@@ -202,7 +202,7 @@ export default function Home() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, delay: 1.1 }}
       >
-        <p className="text-xl md:text-1xl mt-2 text-slate-600 font-medium max-w-3xl">
+        <p className="text-lg md:text-1xl mt-2 text-slate-600 font-medium max-w-3xl">
           Not just items. These are experiences.
         </p>
       </motion.div>
