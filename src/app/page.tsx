@@ -4,7 +4,6 @@ import { motion } from 'framer-motion';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { SearchItem } from '@/types';
-import { Play } from 'lucide-react';
 
 export default function Home() {
   const router = useRouter();

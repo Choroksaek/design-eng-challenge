@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
   ];
 
   // Filter items based on search criteria
-  let filteredItems = mockItems.filter(item => {
+  const filteredItems = mockItems.filter(item => {
     const matchesQuery = !query || 
       item.title.toLowerCase().includes(query.toLowerCase()) ||
       item.description.toLowerCase().includes(query.toLowerCase()) ||
@@ -97,19 +97,20 @@ export async function GET(request: NextRequest) {
     return matchesQuery && matchesCategory && matchesTags && matchesPrice && matchesFeatured;
   });
 
-  // Sort items
+  // Sort items (create sorted copy instead of mutating)
+  const sortedItems = [...filteredItems];
   switch (sortBy) {
     case 'price-asc':
-      filteredItems.sort((a, b) => a.price - b.price);
+      sortedItems.sort((a, b) => a.price - b.price);
       break;
     case 'price-desc':
-      filteredItems.sort((a, b) => b.price - a.price);
+      sortedItems.sort((a, b) => b.price - a.price);
       break;
     case 'rating':
-      filteredItems.sort((a, b) => b.rating - a.rating);
+      sortedItems.sort((a, b) => b.rating - a.rating);
       break;
     case 'newest':
-      filteredItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      sortedItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       break;
     default: // relevance
       // Keep original order for relevance
@@ -130,8 +131,8 @@ export async function GET(request: NextRequest) {
   const allPrices = mockItems.map(item => item.price);
 
   const response: SearchResponse = {
-    items: filteredItems,
-    total: filteredItems.length,
+    items: sortedItems,
+    total: sortedItems.length,
     suggestions: [...new Set(suggestions)],
     facets: {
       categories: allCategories.map(cat => ({

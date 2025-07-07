@@ -40,9 +40,7 @@ export default function Navigation() {
     }
   };
 
-  const clearSearch = () => {
-    router.push('/');
-  };
+
 
   const handleSearchFocus = (focused: boolean) => {
     setIsSearchFocused(focused);

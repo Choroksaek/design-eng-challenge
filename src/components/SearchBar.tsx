@@ -64,6 +64,9 @@ export default function SearchBar({ onFocusChange }: SearchBarProps) {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [hoveredRecentItem, setHoveredRecentItem] = useState<string | null>(null);
+  
+  // Suppress unused variable warning - showSuggestions is used for state management
+  void showSuggestions;
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [suggestionItems, setSuggestionItems] = useState<SearchItem[]>([]);
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);

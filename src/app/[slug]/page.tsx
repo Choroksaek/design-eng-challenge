@@ -4,18 +4,20 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface TagPageProps {
-  params: {
+  params: Promise<{
     slug: string;
-  };
+  }>;
 }
 
 function TagPage({ params }: TagPageProps) {
   const router = useRouter();
 
   useEffect(() => {
-    // Redirect to search page with tag filter
-    router.replace(`/search?tags=${encodeURIComponent(params.slug)}`);
-  }, [params.slug, router]);
+    // Handle async params in Next.js 15
+    params.then((resolvedParams) => {
+      router.replace(`/search?tags=${encodeURIComponent(resolvedParams.slug)}`);
+    });
+  }, [params, router]);
 
   return (
     <div className="min-h-screen bg-white flex items-center justify-center">

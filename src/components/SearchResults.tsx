@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams, usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Filter, Star, X, ShoppingCart, ChevronDown } from 'lucide-react';
@@ -65,6 +65,9 @@ export default function SearchResults() {
     featured: false
   });
 
+  // Add abort controller to cancel inflight requests
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   // Local state for debounced slider
   const [sliderValue, setSliderValue] = useState<[number, number]>([50, 500]);
 
@@ -78,12 +81,12 @@ export default function SearchResults() {
         setSliderValue([min, max]);
       }
     }
-  }, [searchResults?.facets?.priceRange, filters.priceRange?.min, filters.priceRange?.max]);
+  }, [searchResults?.facets?.priceRange, filters.priceRange]);
 
   // Available categories and tags from the API facets
   const categories = searchResults?.facets?.categories?.map(cat => cat.name) || [];
   const availableTags = searchResults?.facets?.tags?.map(tag => tag.name) || [];
-  const sortOptions = [
+  const sortOptions: Array<{ value: SearchFilters['sortBy']; label: string }> = [
     { value: 'relevance', label: 'Relevance' },
     { value: 'price-asc', label: 'Price: Low to High' },
     { value: 'price-desc', label: 'Price: High to Low' },
@@ -104,11 +107,31 @@ export default function SearchResults() {
         const tagsParam = urlParams.get('tags') || '';
         const queryParam = urlParams.get('q') || '';
         
-        setFilters(prev => ({
-          ...prev,
-          tags: tagsParam ? tagsParam.split(',').map(tag => tag.trim()) : [],
-          query: queryParam
-        }));
+        // If no URL parameters, reset all filters to defaults
+        if (!urlParams.toString()) {
+          setFilters(prev => {
+            // Only update if actually different to prevent unnecessary re-renders
+            if (prev.query === '' && prev.tags.length === 0 && prev.category === '' && 
+                !prev.featured && prev.sortBy === 'relevance') {
+              return prev;
+            }
+            return {
+              query: '',
+              category: '',
+              tags: [],
+              sortBy: 'relevance',
+              priceRange: { min: 50, max: 500 },
+              featured: false
+            };
+          });
+        } else {
+          // Update only the URL-controlled filters
+          setFilters(prev => ({
+            ...prev,
+            tags: tagsParam ? tagsParam.split(',').map(tag => tag.trim()) : [],
+            query: queryParam
+          }));
+        }
       } else if (pathname !== '/') {
         // Handle legacy tag routes like /wireless, /gaming, etc.
         const tag = pathname.slice(1); // Remove leading slash
@@ -173,90 +196,135 @@ export default function SearchResults() {
     return () => clearTimeout(handler);
   }, [sliderValue, filters.priceRange?.min, filters.priceRange?.max, handlePriceRangeChange]);
 
-  // Perform search based on URL parameters
+  // Perform search based on URL parameters with debouncing
   useEffect(() => {
-    const performSearch = async () => {
-      setIsSearching(true);
-      
-      try {
-        const params = new URLSearchParams();
-        
-        // Collect all tags from different sources
-        const allTags: string[] = [];
-        
-        // Handle different page types
-        if (pathname === '/search') {
-          // Search page - can have text query and/or tag filters
-          const query = searchParams.get('q') || '';
-          const tagsParam = searchParams.get('tags') || '';
-          
-          if (query) params.append('query', query);
-          if (tagsParam) allTags.push(...tagsParam.split(',').map(tag => tag.trim()));
-          
-          // Only add filter tags if there's no fresh search query in URL
-          // This ensures fresh searches don't inherit previous tag context
-          if (!query && filters.tags.length > 0) {
-            allTags.push(...filters.tags);
-          }
-        } else if (pathname !== '/') {
-          // Legacy tag search page (keeping for backwards compatibility)
-          const tag = pathname.slice(1); // Remove leading slash
-          if (tag) allTags.push(tag);
-        }
-        
-        // Add filters to params
-        if (filters.category) params.append('category', filters.category);
-        if (allTags.length > 0) params.append('tags', [...new Set(allTags)].join(','));
-        if (filters.sortBy) params.append('sortBy', filters.sortBy);
-        if (filters.priceRange?.min) params.append('minPrice', filters.priceRange.min.toString());
-        if (filters.priceRange?.max && filters.priceRange.max < 1000) params.append('maxPrice', filters.priceRange.max.toString());
-        if (filters.featured) params.append('featured', 'true');
-        
-        const response = await fetch(`/api/search?${params}`);
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const data: SearchResponse = await response.json();
-        setSearchResults(data);
-      } catch (error) {
-        console.error('Search failed:', error);
-        setSearchResults(null);
-        
-        // Set user-friendly error message
-        if (error instanceof Error) {
-          if (error.message.includes('Failed to fetch') || error.name === 'TypeError') {
-            setSearchError('Unable to connect to the server. Please check your internet connection and try again.');
-          } else if (error.message.includes('500')) {
-            setSearchError('Server error occurred. Please try again later.');
-          } else {
-            setSearchError('Search failed. Please try again.');
-          }
-        } else {
-          setSearchError('An unexpected error occurred. Please try again.');
-        }
-      } finally {
-        setIsSearching(false);
-        
-        // Smooth skeleton transition - shorter delay and immediate feedback
-        if (isFiltering) {
-          // Immediately hide skeleton, then clear filtering state after animation
-          setShowSkeleton(false);
-          setTimeout(() => {
-            setIsFiltering(false);
-          }, 50); // Just long enough for the fade-out animation
-        }
-        
-        // Mark initial load as complete
-        if (isInitialLoad) {
-          setIsInitialLoad(false);
-        }
-      }
-    };
+    // Cancel any previous request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
 
-    performSearch();
-  }, [pathname, searchParams, filters]);
+    // Debounce to prevent rapid multiple API calls
+    const debounceTimer = setTimeout(() => {
+      const performSearch = async () => {
+        // Create new abort controller for this request
+        const abortController = new AbortController();
+        abortControllerRef.current = abortController;
+
+        setIsSearching(true);
+        setSearchError(null);
+        
+        try {
+          const params = new URLSearchParams();
+          
+          // Collect all tags from different sources
+          const allTags: string[] = [];
+          
+          // Handle different page types
+          if (pathname === '/search') {
+            // Search page - can have text query and/or tag filters
+            const query = searchParams.get('q') || '';
+            const tagsParam = searchParams.get('tags') || '';
+            
+            if (query) params.append('query', query);
+            if (tagsParam) allTags.push(...tagsParam.split(',').map(tag => tag.trim()));
+            
+            // Only add filter tags if there's no fresh search query in URL
+            // This ensures fresh searches don't inherit previous tag context
+            if (!query && filters.tags.length > 0) {
+              allTags.push(...filters.tags);
+            }
+          } else if (pathname !== '/') {
+            // Legacy tag search page (keeping for backwards compatibility)
+            const tag = pathname.slice(1); // Remove leading slash
+            if (tag) allTags.push(tag);
+          }
+          
+          // Add filters to params
+          if (filters.category) params.append('category', filters.category);
+          if (allTags.length > 0) params.append('tags', [...new Set(allTags)].join(','));
+          if (filters.sortBy && filters.sortBy !== 'relevance') params.append('sortBy', filters.sortBy);
+          
+          // Only add price range if it's different from the default range
+          const defaultMinPrice = 50;
+          const defaultMaxPrice = 500;
+          if (filters.priceRange?.min && filters.priceRange.min > defaultMinPrice) {
+            params.append('minPrice', filters.priceRange.min.toString());
+          }
+          if (filters.priceRange?.max && filters.priceRange.max < defaultMaxPrice) {
+            params.append('maxPrice', filters.priceRange.max.toString());
+          }
+          
+          if (filters.featured) params.append('featured', 'true');
+          
+          const response = await fetch(`/api/search?${params}`, {
+            signal: abortController.signal
+          });
+          
+          // Check if request was aborted
+          if (abortController.signal.aborted) {
+            return;
+          }
+          
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          
+          const data: SearchResponse = await response.json();
+          
+          // Double-check abort status before setting results
+          if (!abortController.signal.aborted) {
+            setSearchResults(data);
+          }
+        } catch (error) {
+          // Don't handle abort errors
+          if (error instanceof Error && error.name === 'AbortError') {
+            return;
+          }
+          
+          console.error('Search failed:', error);
+          setSearchResults(null);
+          
+          // Set user-friendly error message
+          if (error instanceof Error) {
+            if (error.message.includes('Failed to fetch') || error.name === 'TypeError') {
+              setSearchError('Unable to connect to the server. Please check your internet connection and try again.');
+            } else if (error.message.includes('500')) {
+              setSearchError('Server error occurred. Please try again later.');
+            } else {
+              setSearchError('Search failed. Please try again.');
+            }
+          } else {
+            setSearchError('An unexpected error occurred. Please try again.');
+          }
+        } finally {
+          // Only update state if this request wasn't aborted
+          if (!abortController.signal.aborted) {
+            setIsSearching(false);
+            
+            // Smooth skeleton transition - shorter delay and immediate feedback
+            if (isFiltering) {
+              // Immediately hide skeleton, then clear filtering state after animation
+              setShowSkeleton(false);
+              setTimeout(() => {
+                setIsFiltering(false);
+              }, 50); // Just long enough for the fade-out animation
+            }
+            
+            // Mark initial load as complete
+            if (isInitialLoad) {
+              setIsInitialLoad(false);
+            }
+          }
+        }
+      };
+
+      performSearch();
+    }, isFiltering ? 150 : 300); // Shorter debounce for filtering, longer for initial searches
+
+    return () => {
+      clearTimeout(debounceTimer);
+    };
+  }, [pathname, searchParams, filters, isFiltering, isInitialLoad]);
 
   const handleFilterChange = (newFilters: Partial<SearchFilters>) => {
     setIsFiltering(true);
@@ -284,43 +352,8 @@ export default function SearchResults() {
     }));
   };
 
-  const clearFilters = () => {
-    // Only proceed if there are actually filters to clear
-    if (hasActiveFilters) {
-      // Don't show skeleton for clear filters - just smooth content transition
-      // This prevents jarring jumps when going from few items to many items
-      
-      // Reset all filters and search query
-      setFilters({
-        query: '',
-        category: '',
-        tags: [],
-        sortBy: 'relevance',
-        priceRange: { min: 50, max: 500 },
-        featured: false
-      });
-      
-      // Navigate to show all items
-      if (pathname === '/search') {
-        // Clear URL parameters to show all items
-        const url = new URL(window.location.origin + '/search');
-        window.history.pushState({}, '', url.toString());
-        window.dispatchEvent(new CustomEvent('urlChanged'));
-      } else {
-        // If on a tag page, navigate to search page to show all items
-        router.push('/search');
-      }
-    } else {
-      // If no active filters, just ensure we're on a clean search page
-      if (pathname !== '/search' || window.location.search) {
-        // Navigate to clean search page if we're not already there
-        router.push('/search');
-      }
-    }
-  };
-
   // Check if any filters are active (including search query and URL parameters)
-  const hasActiveFilters = (() => {
+  const hasActiveFilters = useMemo(() => {
     // Check local filter state
     const hasSearchQuery = Boolean(filters.query);
     const hasCategory = Boolean(filters.category);
@@ -345,7 +378,49 @@ export default function SearchResults() {
     
     return hasSearchQuery || hasCategory || hasTags || hasFeatured || 
            hasCustomMinPrice || hasCustomMaxPrice || hasUrlQuery || hasUrlTags || hasLegacyTag;
-  })();
+  }, [filters, searchParams, pathname, searchResults?.facets?.priceRange]);
+
+  const clearFilters = useCallback(() => {
+    // Only proceed if there are actually filters to clear
+    if (hasActiveFilters) {
+      // Cancel any pending search to avoid race conditions
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      
+      // Don't show skeleton for clear filters - just smooth content transition
+      // This prevents jarring jumps when going from few items to many items
+      
+      // Navigate and update state in one smooth operation
+      if (pathname === '/search') {
+        // Clear URL parameters to show all items
+        const url = new URL(window.location.origin + '/search');
+        window.history.pushState({}, '', url.toString());
+        
+        // Update filters immediately without waiting for URL change
+        setFilters({
+          query: '',
+          category: '',
+          tags: [],
+          sortBy: 'relevance',
+          priceRange: { min: 50, max: 500 },
+          featured: false
+        });
+        
+        // Reset slider to match
+        setSliderValue([50, 500]);
+      } else {
+        // If on a tag page, navigate to search page to show all items
+        router.push('/search');
+      }
+    } else {
+      // If no active filters, just ensure we're on a clean search page
+      if (pathname !== '/search' || window.location.search) {
+        // Navigate to clean search page if we're not already there
+        router.push('/search');
+      }
+    }
+  }, [hasActiveFilters, pathname, router]);
 
   const handleProductClick = (item: { title: string; id: string }) => {
     const url = `/search?q=${encodeURIComponent(item.title)}`;
@@ -392,9 +467,18 @@ export default function SearchResults() {
         // Add filters to params
         if (filters.category) params.append('category', filters.category);
         if (allTags.length > 0) params.append('tags', [...new Set(allTags)].join(','));
-        if (filters.sortBy) params.append('sortBy', filters.sortBy);
-        if (filters.priceRange?.min) params.append('minPrice', filters.priceRange.min.toString());
-        if (filters.priceRange?.max && filters.priceRange.max < 1000) params.append('maxPrice', filters.priceRange.max.toString());
+        if (filters.sortBy && filters.sortBy !== 'relevance') params.append('sortBy', filters.sortBy);
+        
+        // Only add price range if it's different from the default range
+        const defaultMinPrice = 50;
+        const defaultMaxPrice = 500;
+        if (filters.priceRange?.min && filters.priceRange.min > defaultMinPrice) {
+          params.append('minPrice', filters.priceRange.min.toString());
+        }
+        if (filters.priceRange?.max && filters.priceRange.max < defaultMaxPrice) {
+          params.append('maxPrice', filters.priceRange.max.toString());
+        }
+        
         if (filters.featured) params.append('featured', 'true');
         
         const response = await fetch(`/api/search?${params}`);
@@ -879,7 +963,7 @@ export default function SearchResults() {
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.15 + index * 0.04 }}
                             onMouseDown={() => {
-                              handleFilterChange({ sortBy: option.value as any });
+                              handleFilterChange({ sortBy: option.value });
                               setShowSortDropdown(false);
                             }}
                             className={`w-full text-left px-4 py-3 text-sm transition-colors hover:bg-slate-50 ${
@@ -947,7 +1031,7 @@ export default function SearchResults() {
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.15 + index * 0.04 }}
                             onMouseDown={() => {
-                              handleFilterChange({ sortBy: option.value as any });
+                              handleFilterChange({ sortBy: option.value });
                               setShowSortDropdown(false);
                             }}
                             className={`w-full text-left px-4 py-3 text-sm transition-colors hover:bg-slate-50 ${
@@ -1027,7 +1111,7 @@ export default function SearchResults() {
                     No results found
                   </h3>
                   <p className="text-gray-600 mb-6 text-center max-w-md">
-                    Try adjusting your search terms or filters to find what you're looking for
+                    Try adjusting your search terms or filters to find what you&apos;re looking for
                   </p>
                   {hasActiveFilters && (
                     <button
