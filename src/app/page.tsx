@@ -63,10 +63,16 @@ export default function Home() {
           .paused {
             animation-play-state: paused;
           }
+          .line-clamp-2 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+          }
         `}</style>
         <div className="h-screen bg-white overflow-auto flex flex-col">
         {/* Image Gallery Section */}
-        <div className="w-full py-4 overflow-hidden">
+        <div className="w-full py-4 overflow-hidden min-h-[350px] md:min-h-[280px]">
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -88,7 +94,7 @@ export default function Home() {
                 onMouseLeave={() => setIsHovering(false)}
               >
                 {/* Image Container */}
-                <div className="w-full sm:mt-20 lg:mt-4 sm:w-80 h-56 bg-slate-100 rounded-lg overflow-hidden">
+                <div className="w-72 sm:w-80 h-48 sm:h-56 bg-slate-100 rounded-lg overflow-hidden">
                   {product.imageUrl ? (
                     <img 
                       src={product.imageUrl} 
@@ -103,11 +109,11 @@ export default function Home() {
                 </div>
                 
                 {/* Text Content Below Image */}
-                <div className="mt-2 w-60 sm:w-80 opacity-100 md:opacity-0 md:group-hover:opacity-100 transform md:translate-y-2 md:group-hover:translate-y-0 transition-all duration-300 delay-100">
+                <div className="mt-2 w-72 sm:w-80 md:w-80 opacity-100 md:opacity-0 md:group-hover:opacity-100 transform md:translate-y-2 md:group-hover:translate-y-0 transition-all duration-300 delay-100">
                   {/* Product Tags */}
                   {product.tags && product.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mb-2">
-                      {product.tags.map((tag, tagIndex) => (
+                    <div className="flex flex-wrap gap-1 mb-2 max-w-full">
+                      {product.tags.slice(0, 3).map((tag, tagIndex) => (
                         <span 
                           key={tagIndex}
                           className="inline-block px-2 py-1 bg-slate-100 text-slate-700 text-xs font-medium rounded-full"
@@ -115,11 +121,16 @@ export default function Home() {
                           {tag}
                         </span>
                       ))}
+                      {product.tags.length > 3 && (
+                        <span className="inline-block px-2 py-1 bg-slate-100 text-slate-700 text-xs font-medium rounded-full">
+                          +{product.tags.length - 3}
+                        </span>
+                      )}
                     </div>
                   )}
                   
                   {/* Product Name */}
-                  <h3 className="text-slate-900 text-xl font-semibold">{product.title}</h3>
+                  <h3 className="text-slate-900 text-lg sm:text-xl font-semibold line-clamp-2 leading-tight">{product.title}</h3>
                 </div>
               </div>
             ))}
@@ -128,7 +139,7 @@ export default function Home() {
       </div>
 
       {/* Gap/Spacer */}
-      <div className="lg:h-10 h-20"></div>
+      <div className="h-8 sm:h-12 lg:h-10"></div>
 
       {/* Main Text Contents */}
         <div className='flex flex-col m-4 lg:ml-[45vw] items-start flex-1'>

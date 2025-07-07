@@ -65,11 +65,27 @@ export default function SearchResults() {
     featured: false
   });
 
+  // Temporary mobile filter state (for Apply button functionality)
+  const [tempMobileFilters, setTempMobileFilters] = useState<SearchFilters>({
+    query: '',
+    category: '',
+    tags: [],
+    sortBy: 'relevance',
+    priceRange: { min: 50, max: 500 },
+    featured: false
+  });
+
   // Add abort controller to cancel inflight requests
   const abortControllerRef = useRef<AbortController | null>(null);
+  
+  // Ref for sort dropdown to handle click outside
+  const sortDropdownRef = useRef<HTMLDivElement | null>(null);
 
   // Local state for debounced slider
   const [sliderValue, setSliderValue] = useState<[number, number]>([50, 500]);
+  
+  // Mobile temporary slider state
+  const [tempMobileSliderValue, setTempMobileSliderValue] = useState<[number, number]>([50, 500]);
 
   // Update price range from API facets when available
   useEffect(() => {
@@ -326,6 +342,25 @@ export default function SearchResults() {
     };
   }, [pathname, searchParams, filters, isFiltering, isInitialLoad]);
 
+  // Handle click outside to close sort dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: Event) => {
+      if (sortDropdownRef.current && !sortDropdownRef.current.contains(event.target as Node)) {
+        setShowSortDropdown(false);
+      }
+    };
+
+    if (showSortDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('touchstart', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [showSortDropdown]);
+
   const handleFilterChange = (newFilters: Partial<SearchFilters>) => {
     setIsFiltering(true);
     setShowSkeleton(true);
@@ -349,6 +384,54 @@ export default function SearchResults() {
       tags: prev.tags.includes(tag) 
         ? prev.tags.filter(t => t !== tag)
         : [...prev.tags, tag]
+    }));
+  };
+
+  // Mobile-specific handlers for temporary state
+  const handleMobileFilterChange = (newFilters: Partial<SearchFilters>) => {
+    setTempMobileFilters(prev => ({ ...prev, ...newFilters }));
+  };
+
+  const handleMobileCategoryToggle = (category: string) => {
+    setTempMobileFilters(prev => ({
+      ...prev,
+      category: prev.category === category ? '' : category
+    }));
+  };
+
+  const handleMobileTagToggle = (tag: string) => {
+    setTempMobileFilters(prev => ({
+      ...prev,
+      tags: prev.tags.includes(tag) 
+        ? prev.tags.filter(t => t !== tag)
+        : [...prev.tags, tag]
+    }));
+  };
+
+  // Apply mobile filters
+  const applyMobileFilters = () => {
+    setIsFiltering(true);
+    setShowSkeleton(true);
+    setFilters(tempMobileFilters);
+    setShowMobileFilters(false);
+  };
+
+  // Sync temporary filters when modal opens
+  const openMobileFilters = () => {
+    setTempMobileFilters(filters);
+    setTempMobileSliderValue([
+      filters.priceRange?.min ?? 50,
+      filters.priceRange?.max ?? 500
+    ]);
+    setShowMobileFilters(true);
+  };
+
+  // Update temp mobile price range when slider changes
+  const handleTempMobileSliderChange = (value: [number, number]) => {
+    setTempMobileSliderValue(value);
+    setTempMobileFilters(prev => ({
+      ...prev,
+      priceRange: { min: value[0], max: value[1] }
     }));
   };
 
@@ -757,14 +840,14 @@ export default function SearchResults() {
                     <div className="mb-8">
                       <label className="flex items-center cursor-pointer">
                         <div
-                          onClick={() => handleFilterChange({ featured: !filters.featured })}
+                          onClick={() => handleMobileFilterChange({ featured: !tempMobileFilters.featured })}
                           className={`w-11 h-6 rounded-full relative transition-colors duration-200 cursor-pointer ${
-                            filters.featured ? 'bg-gray-900' : 'bg-gray-300'
+                            tempMobileFilters.featured ? 'bg-gray-900' : 'bg-gray-300'
                           }`}
                         >
                           <div
                             className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-all duration-200 shadow-md ${
-                              filters.featured ? 'left-5' : 'left-0.5'
+                              tempMobileFilters.featured ? 'left-5' : 'left-0.5'
                             }`}
                           />
                         </div>
@@ -780,8 +863,8 @@ export default function SearchResults() {
                           <input
                             type="radio"
                             name="category-mobile"
-                            checked={!filters.category}
-                            onChange={() => handleCategoryToggle('')}
+                            checked={!tempMobileFilters.category}
+                            onChange={() => handleMobileCategoryToggle('')}
                             className="mr-2 accent-gray-900"
                           />
                           <span className="text-sm">All</span>
@@ -791,8 +874,8 @@ export default function SearchResults() {
                             <input
                               type="radio"
                               name="category-mobile"
-                              checked={filters.category === category}
-                              onChange={() => handleCategoryToggle(category)}
+                              checked={tempMobileFilters.category === category}
+                              onChange={() => handleMobileCategoryToggle(category)}
                               className="mr-2 accent-gray-900"
                             />
                             <span className="text-sm">{category}</span>
@@ -820,12 +903,12 @@ export default function SearchResults() {
                       {/* Tag List */}
                       <div className="flex flex-wrap gap-2">
                         {/* Selected tags first (with cancel icon) - filtered by search */}
-                        {filters.tags
+                        {tempMobileFilters.tags
                           .filter(tag => tag.toLowerCase().includes(tagSearchQuery.toLowerCase()))
                           .map((tag) => (
                             <button
                               key={`selected-${tag}`}
-                              onClick={() => handleTagToggle(tag)}
+                              onClick={() => handleMobileTagToggle(tag)}
                               className="flex items-center bg-gray-900 text-white border-none rounded-full px-3 py-1.5 text-sm cursor-pointer gap-1.5"
                             >
                               {tag}
@@ -835,11 +918,11 @@ export default function SearchResults() {
                         
                         {/* Unselected tags - filtered by search */}
                         {filteredTags
-                          .filter(tag => !filters.tags.includes(tag))
+                          .filter(tag => !tempMobileFilters.tags.includes(tag))
                           .map((tag) => (
                             <button
                               key={`unselected-${tag}`}
-                              onClick={() => handleTagToggle(tag)}
+                              onClick={() => handleMobileTagToggle(tag)}
                               className="bg-gray-100 text-black border-none rounded-full px-3 py-1.5 text-sm cursor-pointer transition-colors duration-200 hover:bg-gray-200"
                             >
                               {tag}
@@ -856,8 +939,8 @@ export default function SearchResults() {
                           min={50}
                           max={500}
                           step={50}
-                          value={sliderValue}
-                          onValueChange={value => setSliderValue(value as [number, number])}
+                          value={tempMobileSliderValue}
+                          onValueChange={value => handleTempMobileSliderChange(value as [number, number])}
                           className="w-full h-6 flex items-center"
                         />
                         <style>{`.slider-track, .slider > .slider-track { height: 4px !important; }`}</style>
@@ -870,9 +953,9 @@ export default function SearchResults() {
                             <input
                               type="number"
                               min={50}
-                              max={sliderValue[1]}
-                              value={sliderValue[0]}
-                              onChange={(e) => setSliderValue([Number(e.target.value) || 50, sliderValue[1]])}
+                              max={tempMobileSliderValue[1]}
+                              value={tempMobileSliderValue[0]}
+                              onChange={(e) => handleTempMobileSliderChange([Number(e.target.value) || 50, tempMobileSliderValue[1]])}
                               className="w-full py-2.5 px-3 pl-6 rounded-xl border border-gray-200 text-sm bg-gray-50"
                               placeholder="50"
                             />
@@ -885,15 +968,33 @@ export default function SearchResults() {
                             <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-sm text-gray-500">$</span>
                             <input
                               type="number"
-                              min={sliderValue[0]}
+                              min={tempMobileSliderValue[0]}
                               max={500}
-                              value={sliderValue[1]}
-                              onChange={(e) => setSliderValue([sliderValue[0], Number(e.target.value) || 500])}
+                              value={tempMobileSliderValue[1]}
+                              onChange={(e) => handleTempMobileSliderChange([tempMobileSliderValue[0], Number(e.target.value) || 500])}
                               className="w-full py-2.5 px-3 pl-6 rounded-xl border border-gray-200 text-sm bg-gray-50"
                               placeholder="500"
                             />
                           </div>
                         </div>
+                      </div>
+                    </div>
+
+                    {/* Apply Button */}
+                    <div className="mt-8 pt-6 border-t border-gray-200 sticky bottom-0 bg-white">
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => setShowMobileFilters(false)}
+                          className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-medium"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={applyMobileFilters}
+                          className="flex-1 px-6 py-3 bg-gray-900 text-white rounded-xl hover:bg-gray-800 transition-colors font-medium"
+                        >
+                          Apply Filters
+                        </button>
                       </div>
                     </div>
 
@@ -992,13 +1093,10 @@ export default function SearchResults() {
                  </h3>
                 
                 {/* Sort Dropdown */}
-                <div className="relative z-40">
+                <div className="relative z-40" ref={sortDropdownRef}>
                   <button
-                    onFocus={() => setShowSortDropdown(true)}
-                    onBlur={() => {
-                      setTimeout(() => setShowSortDropdown(false), 200);
-                    }}
-                    className={`flex items-center gap-2 border rounded-xl px-4 py-3 text-sm focus:outline-none transition-all duration-200 ${
+                    onClick={() => setShowSortDropdown(!showSortDropdown)}
+                    className={`flex items-center gap-2 border rounded-xl px-4 py-3 text-sm focus:outline-none transition-all duration-200 touch-manipulation ${
                       showSortDropdown 
                         ? 'bg-slate-50 border-slate-300' 
                         : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300'
@@ -1030,11 +1128,11 @@ export default function SearchResults() {
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.15 + index * 0.04 }}
-                            onMouseDown={() => {
+                            onClick={() => {
                               handleFilterChange({ sortBy: option.value });
                               setShowSortDropdown(false);
                             }}
-                            className={`w-full text-left px-4 py-3 text-sm transition-colors hover:bg-slate-50 ${
+                            className={`w-full text-left px-4 py-3 text-sm transition-colors hover:bg-slate-50 active:bg-slate-100 touch-manipulation ${
                               filters.sortBy === option.value 
                                 ? 'text-slate-900 bg-slate-50 font-medium' 
                                 : 'text-slate-700'
@@ -1053,7 +1151,7 @@ export default function SearchResults() {
               <div className="flex items-center justify-between mb-4">
                 {/* Mobile Filter Toggle */}
                 <button
-                  onClick={() => setShowMobileFilters(!showMobileFilters)}
+                  onClick={openMobileFilters}
                   className="flex items-center justify-center w-10 h-10 text-gray-600 hover:text-gray-900 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors relative"
                 >
                   <Filter className="w-4 h-4" />
